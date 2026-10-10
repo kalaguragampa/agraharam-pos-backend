@@ -1,0 +1,9 @@
+fastapi==0.143.0
+uvicorn[standard]==0.54.0
+SQLAlchemy==2.1.4
+psycopg[binary]==3.3.6
+pwdlib[argon2]==0.3.1
+pydantic-settings==2.15.0
+email-validator==2.3.0
+cryptography>=46,<48
+Pillow>=11,<13

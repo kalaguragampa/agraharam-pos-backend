@@ -1,0 +1,43 @@
+AGRAHARAM POS — MANUAL PASSCODE, GST REPORT AND THERMAL/KOT UPDATE
+
+Stop existing terminals with Ctrl+C before overlaying these ZIPs. Existing .env and database are preserved. No Docker.
+Backend folder: /Users/sainathreddy/Documents/pos-backend
+unzip -o ~/Downloads/Agraharam_Backend_Manual_Passcode_KOT_Thermal_Patch.zip
+.venv/bin/python -m pip install -r requirements.txt
+bash run-local.sh
+Backend starts on 8011. The startup seed performs additive migrations for user, customer, company settings and bill GST snapshot fields.
+
+Frontend folder: /Users/sainathreddy/Documents/pos-frontend
+unzip -o ~/Downloads/Agraharam_Frontend_Manual_Passcode_KOT_Thermal_Patch.zip
+npm install
+npm run build
+npm run app
+Open http://localhost:5181. Keep the same browser profile and localhost address you used before the update. Close/reopen all installed app/browser tabs after updating so the service worker activates. The development server (npm run dev) does not install the production offline shell.
+
+MANUAL STAFF PASSCODES
+Create user: enter username, name, email, exactly four digits (leading zeros allowed), and permitted menus. No passcode is generated. Email and username are editable for existing users. Blank passcode during edit keeps the existing credential. Changing a passcode invalidates that user's server sessions. Only administrators can show saved passcodes. Existing support login credentials remain unchanged. Hash-only older credentials cannot be revealed until a new four-digit passcode is set.
+Login hashes use Argon2. Administrator reveal uses encryption. Preserve and back up backend .passcode_encryption_key and .offline_signing_key with the database. Never overwrite these with patch contents. Production requires configured PASSCODE_ENCRYPTION_KEY and OFFLINE_SIGNING_KEY. These keys and .env are excluded from the ZIPs.
+
+SUBMENUS
+Items, Reports and Settings start collapsed. Opening one closes the other groups. Logout resets all groups to collapsed.
+
+GST REPORT
+Reports > GST Reports defaults to the current month in India time. The table follows the screenshot: Type, Taxable value, CGST, SGST, IGST, CESS, Total amount. Click a type to see its captured records. Filter dates, export summary CSV, or print/save PDF.
+Enter your business GSTIN and state in Settings > Receipt & GST before new billing. Example state code: 36 (Telangana). Place of supply on a bill defaults to the configured business state; the billing user can explicitly change it. Enter a customer GSTIN in Customers for registered customers. Buyer GSTIN and declared place of supply are saved with the bill. Historical totals/splits are never recomputed from later settings.
+B2B uses buyer GSTIN. Unregistered interstate bills above INR 100,000 are B2CL; other ordinary taxable unregistered bills are B2CS. Intrastate GST is split between CGST and SGST with the rounding remainder preserved; interstate GST is IGST. HSN/SAC summaries use immutable bill line codes and tax allocations. HSN rows repeat underlying sales: do not add them to B2B/B2C sales totals.
+Missing historical business GSTIN/place of supply is shown as UNCLASSIFIED. No tax split is invented. CDNR/CDNUR and EXEMP display dashes and explain their unsupported capture, rather than falsely reporting zero activity. DOC lists issued and cancelled bill references. Cancelling a bill is not a tax credit note. This is a management report, not a statutory GST return upload or a complete GST tax invoice implementation. Receipts remain labelled bill receipts.
+GST classification reference: https://tutorial.gst.gov.in/userguide/returns/Creation_of_Outward_Supplies_Return_in_GSTR-1.htm
+
+THERMAL BILL AND KOT
+Settings > Receipt & GST > Thermal printer: choose 80 mm or 58 mm on each device. Open a saved receipt, then Print thermal bill or Print KOT. KOT shows the linked bill number, date, customer, item names and quantities, staff, and pending offline flag if applicable. KOT has no prices or GST and cannot print for cancelled bills. KOT is generated from saved sales only; there is no unbilled draft KOT workflow in this patch.
+Printing uses the system/browser print dialog. Install your printer driver on the computer; select the thermal printer, matching roll width, margins None, scale 100%, headers/footers off. Silent printing, raw ESC/POS, Bluetooth/USB printer pairing and automatic cutter commands are not implemented. Check actual paper output on your printer. The bill/KOT print document is isolated from the app navigation and report styling. It escapes item/customer text.
+
+OFFLINE STORAGE — EXACT LOCATION AND DATABASE
+Pending bills are written to IndexedDB on the current device before sync is attempted. Database name: agraharam-offline-v1. Object store: data. Pending bill record keys: /api:bill:<request UUID> for the default API configuration. The browser manages these files inside its user profile on the device disk; they are not files inside pos-backend, not in Downloads, and not initially in PostgreSQL. There is no separate D drive selection. An installed PWA uses that browser profile's origin storage.
+In Chrome/Edge: open the POS > Developer Tools > Application > IndexedDB > agraharam-offline-v1 > data to inspect records. Cache Storage contains the app shell/assets; it does not hold the pending bill records. Item images/catalogue/customer data are also cached in IndexedDB for offline operation.
+After successful sync, the central database is PostgreSQL kg_pos, table orders. The local record is marked synced and retained on the device. A stable UUID prevents duplicates on retry. Pending bills sync under the original billing account when the configured backend is reachable, login is valid, and bill validation succeeds. Wi-Fi alone does not guarantee the backend is reachable.
+Keep the same device/browser profile and URL. Clearing site data, uninstalling with data removal, using another profile/origin, or losing the device can remove unsynced bills. Before doing so, sync or use Device & sync > Back up pending bills. That button downloads agraharam-pending-bills.json; this patch does not implement automated backup import.
+The first login and catalogue download must be online. Cached offline login/catalogue validity is 72 hours; very old pending bills may need review. Reports and administrative edits require the server. Pending offline sales appear in central reports only after successful sync.
+
+CHECKS
+19 backend tests passed using an isolated SQLite test database. Production frontend build, simulated offline restart/account isolation/sync tests, and thermal bill/KOT layout/text escaping tests passed. Live PostgreSQL, actual device installation, and physical printer output must still be verified on your Mac.

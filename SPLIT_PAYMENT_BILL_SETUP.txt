@@ -1,0 +1,33 @@
+AGRAHARAM POS — BILL AND SPLIT PAYMENT UPDATE
+
+Apply BOTH frontend and backend patches to your existing project. Stop the two terminals with Ctrl+C before applying. These ZIPs overlay source files; they do not contain .env, database files, private keys, dependencies, or Docker. Keep your existing .env and private key files.
+
+CHANGES
+Daily Closing is removed from navigation, permission choices and registered API routes. Existing historical closing database tables are preserved.
+Choose Cash, UPI, Card or Split in billing. Split accepts any two or all three methods. Enter received amounts, then use Balance to fill the remainder for a method. The amounts must equal the bill total; this is checked in the interface, offline save and server.
+Cash/UPI/Card report totals include each portion of split payments. Item report portions are allocated proportionally and rounded to conserve both line totals and method totals. Cancelled bills are excluded from sales and payment totals.
+Receipt has a clearer header, item names, quantity/MRP/amount rows, larger total, payment breakdown, date, bill number and cashier name/username. Bill + KOT remains one print action with bill first and KOT second. Choose 58mm or 80mm in printer settings and check actual printer paper size and margins. Card/UPI buttons record payments; they do not collect money through a payment gateway.
+Clear also resets payment amounts and customer selection. Existing single-method bills and pending offline bills remain compatible.
+
+BACKEND TERMINAL
+cd /Users/sainathreddy/Documents/pos-backend
+unzip -o ~/Downloads/Agraharam_Backend_Split_Payment_Bill_Patch.zip -d .
+.venv/bin/python -m pip install -r requirements.txt
+bash run-local.sh
+
+run-local.sh applies additive schema updates (including payment_details), then runs API on 127.0.0.1:8011. It does not reset existing users or bills. Back up your PostgreSQL database before staging. Keep your existing DATABASE_URL.
+
+FRONTEND TERMINAL
+cd /Users/sainathreddy/Documents/pos-frontend
+unzip -o ~/Downloads/Agraharam_Frontend_Split_Payment_Bill_Patch.zip -d .
+npm ci
+npm run build
+npm run app
+
+Open http://localhost:5181. Close/reopen installed app windows to load the new app shell, then sign in online once to refresh cached data. Do not clear browser storage while pending bills remain.
+
+OFFLINE STORAGE
+Bills are saved in IndexedDB in the same browser/profile/device, database agraharam-offline-v1, object store data, bill records under /api:bill:<UUID>. Exact key prefix depends on configured API URL. Split amounts are stored with each bill and survive reload. They sync to PostgreSQL after connectivity returns while signed in as the original user. Browser data clearing or device loss can lose unsynced bills. Online sign-in and catalogue refresh are required; current offline catalogue/login access lasts up to 72 hours.
+
+VALIDATION
+29 backend tests passed; four historical Daily Closing tests skipped because the feature was removed. Frontend production build, thermal receipt tests and offline restart/isolation/retry/split-validation tests passed. Backend tests used SQLite; verify your PostgreSQL instance and real thermal printer before staging. Deployment has not been performed.

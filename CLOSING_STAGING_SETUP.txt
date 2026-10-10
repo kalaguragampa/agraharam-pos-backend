@@ -1,0 +1,1 @@
+Daily Closing has been removed. Follow SPLIT_PAYMENT_BILL_SETUP.txt instead of the earlier closing patch instructions. Historical database rows are preserved.
