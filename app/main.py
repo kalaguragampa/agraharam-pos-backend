@@ -266,11 +266,15 @@ def create_order(body: OrderIn,user: User=Depends(require('billing')),db: Sessio
     return order_view(order)
 
 @app.get('/orders')
-def orders(q: str=Query('',max_length=100),payment: str|None=None,limit: int=Query(100,ge=1,le=500),offset: int=Query(0,ge=0),user: User=Depends(require('orders')),db: Session=Depends(get_db)):
+def orders(q: str=Query('',max_length=100),payment: str|None=None,start: date|None=None,end: date|None=None,cashier: str|None=None,limit: int=Query(100,ge=1,le=500),offset: int=Query(0,ge=0),user: User=Depends(require('orders')),db: Session=Depends(get_db)):
     stmt=select(Order)
     if q:
         stmt=stmt.where((Order.bill_number==q)|(Order.customer_name.ilike('%'+q.replace('%','\\%').replace('_','\\_')+'%',escape='\\'))|(Order.id==int(q.removeprefix('AGR-')) if q.removeprefix('AGR-').isdigit() else False))
     if payment:stmt=stmt.where(or_(Order.payment==payment,*[Order.payment_details[n]['method'].as_string()==payment for n in range(3)]))
+    if start and end and start>end:raise HTTPException(422,'End date must follow start date')
+    if start:stmt=stmt.where(Order.created_at>=datetime.combine(start,time.min,tzinfo=ZoneInfo('Asia/Kolkata')).astimezone(timezone.utc))
+    if end:stmt=stmt.where(Order.created_at<datetime.combine(end+timedelta(days=1),time.min,tzinfo=ZoneInfo('Asia/Kolkata')).astimezone(timezone.utc))
+    if cashier:stmt=stmt.where(Order.staff_name==cashier)
     count=db.scalar(select(func.count()).select_from(stmt.subquery()))
     return {'total':count,'items':[order_view(o) for o in db.scalars(stmt.order_by(Order.id.desc()).limit(limit).offset(offset))]}
 @app.get('/orders/{id}')
@@ -305,7 +309,7 @@ def summary(db,start,end):
         for method,amount in allocations(o).items():payments[method]+=amount
         for i in o.items:
             p=popular.setdefault(i['name'],{'name':i['name'],'qty':0,'sales':0.0});p['qty']+=i['qty'];p['sales']+=float(i['line_total'])
-    return {'total_sales':float(sum((o.total for o in rows),Decimal('0'))),'bill_count':len(rows),'tax':float(sum((o.tax for o in rows),Decimal('0'))),'cancelled_count':db.scalar(select(func.count()).select_from(date_query(start,end,True).where(Order.status=='Cancelled').subquery())),'payments':{k:float(v) for k,v in payments.items()},'popular':sorted(popular.values(),key=lambda i:i['sales'],reverse=True)}
+    return {'total_sales':float(sum((o.total for o in rows),Decimal('0'))),'bill_count':len(rows),'tax':float(sum((o.tax for o in rows),Decimal('0'))),'cancelled_count':db.scalar(select(func.count()).select_from(date_query(start,end,True).where(Order.status=='Cancelled').subquery())),'cancelled_amount':float(sum((o.total for o in db.scalars(date_query(start,end,True).where(Order.status=='Cancelled'))),Decimal('0'))),'payments':{k:float(v) for k,v in payments.items()},'popular':sorted(popular.values(),key=lambda i:i['sales'],reverse=True)}
 @app.get('/dashboard')
 def dashboard(user: User=Depends(require('dashboard')),db: Session=Depends(get_db)):
     day=datetime.now(IST).date();return summary(db,day,day)
