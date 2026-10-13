@@ -18,7 +18,7 @@ def gst_report_data(orders):
         rows[n].update({k:None for k in fields})
     hsn={}
     for o in orders:
-        doc={'bill':f'AGR-{o.id:06d}','date':o.created_at,'status':o.status,'total':o.total}
+        doc={'bill':o.bill_number or f'AGR-{o.id:06d}','date':o.created_at,'status':o.status,'total':o.total}
         rows['DOC']['details'].append(doc)
         if o.status!='Completed':continue
         g=o.gst_details or {};kind=g.get('classification','UNCLASSIFIED')
@@ -32,10 +32,10 @@ def gst_report_data(orders):
         for k in fields:rows[group][k]+=values[k]
         remaining={k:values[k] for k in fields}
         for index,line in enumerate(o.items):
-            key=(group,line.get('hsn_code') or line.get('sac_code') or 'Missing HSN/SAC')
-            h=hsn.setdefault(key,{'code':key[1],'qty':0,**{k:Decimal('0') for k in fields}});h['qty']+=line['qty']
+            key=(group,line.get('hsn_code') or line.get('sac_code') or 'Missing HSN/SAC',str(line.get('gst_rate',o.tax_rate)))
+            h=hsn.setdefault(key,{'code':key[1],'rate':key[2],'qty':0,**{k:Decimal('0') for k in fields}});h['qty']+=line['qty']
             for k in fields:
-                value=remaining[k] if index==len(o.items)-1 else (values[k]*Decimal(str(line['line_total']))/o.total).quantize(Decimal('.01'),rounding=ROUND_HALF_UP)
+                value=(Decimal(str(line.get({'subtotal':'taxable_value','cgst':'cgst','sgst':'sgst','igst':'igst','total':'line_total'}.get(k,''),0))) if k!='cess' else Decimal('0')) if 'taxable_value' in line else (remaining[k] if index==len(o.items)-1 else (values[k]*Decimal(str(line['line_total']))/o.total).quantize(Decimal('.01'),rounding=ROUND_HALF_UP))
                 h[k]+=value;remaining[k]-=value
     for (group,_),r in hsn.items():rows[group]['details'].append(r)
     unknown=rows['UNCLASSIFIED'];unknown['note']='Tax split and B2B/B2C classification require review; historical bills were not changed'
