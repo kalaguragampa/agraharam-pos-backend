@@ -43,12 +43,12 @@ def catalogue(user: User=Depends(require('billing')),db: Session=Depends(get_db)
     if not settings:raise HTTPException(503,'Initialize database first')
     now=datetime.now(timezone.utc)
     items=[{'item_id':i.id,'name':i.name,'category':i.category,'price':str(i.price),**{k:v for k,v in (i.service_details or {}).items() if k!='image'}} for i in db.scalars(select(MenuItem).where(MenuItem.active.is_(True)))]
-    payload={'user_id':user.id,'staff_name':user.name,'staff_username':user.username or '','issued_at':now.isoformat(),'expires_at':(now+timedelta(days=3)).isoformat(),'items':items,'tax_rate':str(settings.tax_rate),'address':settings.address,'phone':settings.phone,'seller_gstin':settings.gstin,'seller_state':settings.state_code}
+    payload={'user_id':user.id,'staff_name':user.name,'staff_username':user.username or '','issued_at':now.isoformat(),'expires_at':(now+timedelta(days=3)).isoformat(),'items':items,'tax_rate':str(settings.tax_rate),'address':settings.address,'phone':settings.phone,'seller_gstin':settings.gstin,'seller_state':settings.state_code,'receipt_details':{'business_name':settings.business_name,'branch_name':settings.branch_name,'legal_name':settings.legal_name,'fssai_number':settings.fssai_number,'gstin':settings.gstin,'address':settings.address,'phone':settings.phone}}
     return {**payload,'catalogue_token':encode(payload),'images':{i.id:(i.service_details or {}).get('image','') for i in db.scalars(select(MenuItem).where(MenuItem.active.is_(True)))}}
 
 @router.post('/orders',status_code=201)
 def sync_order(body: OfflineOrderIn,user: User=Depends(require('billing')),db: Session=Depends(get_db)):
-    from .main import order_view
+    from .main import order_view, invoice_number, tax_lines
     order=body.order;request_body=order.model_dump(mode='json')
     existing=db.scalar(select(Order).where(Order.request_id==str(order.request_id)))
     if existing:
@@ -73,13 +73,16 @@ def sync_order(body: OfflineOrderIn,user: User=Depends(require('billing')),db: S
     if total!=order.expected_total:raise HTTPException(409,'Offline total does not match the signed item prices')
     customer=db.get(Customer,str(order.customer_id)) if order.customer_id else None
     if order.customer_id and not customer:raise HTTPException(409,'Offline customer needs administrator review')
-    rate=Decimal(snapshot['tax_rate']);subtotal=(total/(1+rate/100)).quantize(Decimal('.01'),rounding=ROUND_HALF_UP)
+    rate=Decimal(snapshot['tax_rate']);subtotal,calculated_tax,cgst,sgst,igst=tax_lines(lines,rate,snapshot.get('seller_state',''),order.place_of_supply)
     from .gst import tax_snapshot
     from .payments import payment_details
-    saved=Order(gst_details=tax_snapshot(snapshot.get('seller_gstin',''),snapshot.get('seller_state',''),order.buyer_gstin,order.place_of_supply,total-subtotal,total),request_id=str(order.request_id),request_body=request_body,staff_id=user.id,staff_name=snapshot.get('staff_name',user.name),staff_username=snapshot.get('staff_username',user.username or ''),customer_id=customer.id if customer else None,customer_name=customer.name if customer else '',order_type=order.order_type,payment=order.payment,payment_details=payment_details(order),items=lines,total=total,subtotal=subtotal,tax=total-subtotal,tax_rate=rate,address=snapshot['address'],phone=snapshot['phone'],created_at=created)
+    gst=tax_snapshot(snapshot.get('seller_gstin',''),snapshot.get('seller_state',''),order.buyer_gstin,order.place_of_supply,calculated_tax,total)
+    if gst.get('classification')!='UNCLASSIFIED':gst.update(cgst=str(cgst),sgst=str(sgst),igst=str(igst))
+    saved=Order(gst_details=gst,receipt_details=snapshot.get('receipt_details',{}),request_id=str(order.request_id),request_body=request_body,staff_id=user.id,staff_name=snapshot.get('staff_name',user.name),staff_username=snapshot.get('staff_username',user.username or ''),customer_id=customer.id if customer else None,customer_name=customer.name if customer else '',order_type=order.order_type,payment=order.payment,payment_details=payment_details(order),items=lines,total=total,subtotal=subtotal,tax=total-subtotal,tax_rate=rate,address=snapshot['address'],phone=snapshot['phone'],created_at=created)
     db.add(saved)
     from sqlalchemy.exc import IntegrityError
     try:
+        saved.bill_number=invoice_number(db,db.get(CompanySettings,1),created)
         db.flush();db.add(Audit(actor_id=user.id,action='bill.offline_synced',target_id=str(saved.id),details={'request_id':saved.request_id,'total':str(total),'payment':saved.payment}));db.commit()
     except IntegrityError:
         db.rollback();existing=db.scalar(select(Order).where(Order.request_id==str(order.request_id)))
