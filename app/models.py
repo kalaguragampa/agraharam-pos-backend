@@ -6,9 +6,21 @@ from .db import Base
 
 def now(): return datetime.now(timezone.utc)
 
+class Branch(Base):
+    __tablename__ = 'branches'
+    id: Mapped[str] = mapped_column(String(10), primary_key=True)
+    name: Mapped[str] = mapped_column(String(100), unique=True)
+    invoice_prefix: Mapped[str] = mapped_column(String(12), unique=True)
+    gstin: Mapped[str] = mapped_column(String(15))
+    address: Mapped[str] = mapped_column(String(200), default='')
+    phone: Mapped[str] = mapped_column(String(20), default='')
+    fssai_number: Mapped[str] = mapped_column(String(20), default='')
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+
 class User(Base):
     __tablename__ = 'users'
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    branch_id: Mapped[str | None] = mapped_column(ForeignKey('branches.id'), nullable=True, index=True)
     email: Mapped[str] = mapped_column(String(254), unique=True, index=True)
     username: Mapped[str | None] = mapped_column(String(80), unique=True, nullable=True)
     passcode_ciphertext: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -68,6 +80,7 @@ class CompanySettings(Base):
     invoice_prefix: Mapped[str] = mapped_column(String(12), default='AGLB')
 
 class Order(Base):
+    branch_id: Mapped[str] = mapped_column(ForeignKey('branches.id'), default='BR002', server_default='BR002', index=True)
     gst_details: Mapped[dict] = mapped_column(JSON, default=dict, server_default='{}')
     __tablename__ = 'orders'
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
