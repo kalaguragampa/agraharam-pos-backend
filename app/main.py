@@ -136,16 +136,16 @@ def menu(user: User=Depends(require('menu','billing')),db: Session=Depends(get_d
     q=select(MenuItem).order_by(MenuItem.category,MenuItem.name)
     if not user.is_admin and 'menu' not in user.permissions:q=q.where(MenuItem.active.is_(True))
     rate=float(settings(db).tax_rate)
-    return [{**menu_view(i),'gst_rate':rate} for i in db.scalars(q)]
+    return [{**menu_view(i),'configured_gst_rate':float((i.service_details or {}).get('gst_rate_override') if (i.service_details or {}).get('gst_rate_override') is not None else rate),'gst_rate':rate} for i in db.scalars(q)]
 @app.post('/menu',status_code=201)
 def add_menu(body: MenuIn,user: User=Depends(require('menu')),db: Session=Depends(get_db)):
-    payload=body.model_dump();details={k:payload.pop(k) for k in ('code','duration_minutes','sac_code','description','image')}
+    payload=body.model_dump();details={k:payload.pop(k) for k in ('code','duration_minutes','sac_code','hsn_code','gst_rate_override','description','image')}
     ensure_category(db,payload['category'])
     i=MenuItem(id=str(uuid4()),service_details=details,**payload);db.add(i);audit(db,user,'menu.created',i.id,{'name':i.name,'price':str(i.price)});db.commit();return menu_view(i)
 @app.put('/menu/{id}')
 def edit_menu(id: str,body: MenuIn,user: User=Depends(require('menu')),db: Session=Depends(get_db)):
     i=get_or_404(db,MenuItem,id);before={k:v for k,v in menu_view(i).items() if k!='image'}
-    payload=body.model_dump();i.service_details={k:payload.pop(k) for k in ('code','duration_minutes','sac_code','description','image')}
+    payload=body.model_dump();i.service_details={k:payload.pop(k) for k in ('code','duration_minutes','sac_code','hsn_code','gst_rate_override','description','image')}
     ensure_category(db,payload['category'])
     for k,v in payload.items():setattr(i,k,v)
     audit(db,user,'menu.updated',i.id,{'before':before,'after':{k:v for k,v in menu_view(i).items() if k!='image'}});db.commit();return menu_view(i)
