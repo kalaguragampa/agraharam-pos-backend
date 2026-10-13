@@ -11,7 +11,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from .config import config
 from .db import get_db
-from .models import User, LoginSession, LoginAttempt, MenuItem, Customer, CompanySettings, Order, Audit, Category
+from .models import User, LoginSession, LoginAttempt, MenuItem, Customer, CompanySettings, Order, Audit, Category, Branch
 from .schemas import LoginIn, UserIn, UserEdit, MenuIn, CustomerIn, SettingsIn, OrderIn, PERMISSIONS, CategoryIn, CancelIn
 from .security import current_user, require, admin, hasher, DUMMY_HASH, token_hash, user_view
 
@@ -223,7 +223,7 @@ def edit_settings(body: SettingsIn,user: User=Depends(require('settings')),db: S
     for k,v in body.model_dump().items():setattr(s,k,v)
     audit(db,user,'settings.updated',1,settings_view(s));db.commit();return settings_view(s)
 
-def order_view(o):return {'gst_details':o.gst_details,'id':o.id,'status':o.status,'cancellation':o.cancellation,'bill_number':o.bill_number or f'AGR-{o.id:06d}','receipt_details':o.receipt_details or {},'request_id':o.request_id,'staff_name':o.staff_name,'staff_username':o.staff_username,'customer_name':o.customer_name,'customer_id':o.customer_id,'order_type':o.order_type,'payment':o.payment,'payments':o.payment_details or [{'method':o.payment,'amount':str(o.total)}],'items':o.items,'total':float(o.total),'subtotal':float(o.subtotal),'tax':float(o.tax),'tax_rate':float(o.tax_rate),'address':o.address,'phone':o.phone,'created_at':o.created_at}
+def order_view(o):return {'branch_id':o.branch_id,'gst_details':o.gst_details,'id':o.id,'status':o.status,'cancellation':o.cancellation,'bill_number':o.bill_number or f'AGR-{o.id:06d}','receipt_details':o.receipt_details or {},'request_id':o.request_id,'staff_name':o.staff_name,'staff_username':o.staff_username,'customer_name':o.customer_name,'customer_id':o.customer_id,'order_type':o.order_type,'payment':o.payment,'payments':o.payment_details or [{'method':o.payment,'amount':str(o.total)}],'items':o.items,'total':float(o.total),'subtotal':float(o.subtotal),'tax':float(o.tax),'tax_rate':float(o.tax_rate),'address':o.address,'phone':o.phone,'created_at':o.created_at}
 @app.post('/orders',status_code=201)
 def create_order(body: OrderIn,user: User=Depends(require('billing')),db: Session=Depends(get_db)):
     rid=str(body.request_id)
@@ -233,6 +233,11 @@ def create_order(body: OrderIn,user: User=Depends(require('billing')),db: Sessio
         return old
     old=existing()
     if old:return order_view(old)
+    branch_id = body.branch_id or (user.branch_id if not user.is_admin else 'BR002')
+    if not branch_id:raise HTTPException(403,'Cashier has no assigned branch; contact administrator')
+    if not user.is_admin and branch_id!=user.branch_id:raise HTTPException(403,'You cannot bill for another branch')
+    branch=db.get(Branch,branch_id)
+    if not branch or not branch.active:raise HTTPException(422,'Selected branch is unavailable')
     quantities={}
     for line in body.items:
         id=str(line.item_id);quantities[id]=quantities.get(id,0)+line.qty
@@ -254,16 +259,33 @@ def create_order(body: OrderIn,user: User=Depends(require('billing')),db: Sessio
     subtotal,calculated_tax,cgst,sgst,igst=tax_lines(items,s.tax_rate,s.state_code or s.gstin[:2],body.place_of_supply)
     snapshot=tax_snapshot(s.gstin,s.state_code,body.buyer_gstin,body.place_of_supply,calculated_tax,total)
     if snapshot.get('classification')!='UNCLASSIFIED':snapshot.update(cgst=str(cgst),sgst=str(sgst),igst=str(igst))
-    order=Order(gst_details=snapshot,receipt_details=receipt_settings(s),request_id=rid,request_body=body.model_dump(mode='json'),staff_id=user.id,staff_name=user.name,staff_username=user.username or '',customer_id=c.id if c else None,customer_name=c.name if c else '',order_type=body.order_type,payment=body.payment,payment_details=payment_details(body),items=items,total=total,subtotal=subtotal,tax=total-subtotal,tax_rate=s.tax_rate,address=s.address,phone=s.phone)
+    branch_receipt={**receipt_settings(s),'branch_name':branch.name,'invoice_prefix':branch.invoice_prefix,'address':branch.address or (s.address if branch.id=='BR002' else ''),'phone':branch.phone or (s.phone if branch.id=='BR002' else ''),'fssai_number':branch.fssai_number or s.fssai_number}
+    order=Order(branch_id=branch.id,gst_details=snapshot,receipt_details=branch_receipt,request_id=rid,request_body=body.model_dump(mode='json'),staff_id=user.id,staff_name=user.name,staff_username=user.username or '',customer_id=c.id if c else None,customer_name=c.name if c else '',order_type=body.order_type,payment=body.payment,payment_details=payment_details(body),items=items,total=total,subtotal=subtotal,tax=total-subtotal,tax_rate=s.tax_rate,address=branch_receipt['address'],phone=branch_receipt['phone'])
     db.add(order)
     try:
-        order.bill_number=invoice_number(db,s,datetime.now(timezone.utc))
+        order.bill_number=invoice_number(db,branch,datetime.now(timezone.utc))
         db.flush();audit(db,user,'order.completed',order.id,{'total':str(total),'payment':body.payment});db.commit()
     except IntegrityError:
         db.rollback();old=existing()
         if old:return order_view(old)
         raise HTTPException(409,'Order could not be saved; retry the same request')
     return order_view(order)
+
+@app.get('/branches')
+def branches(user: User=Depends(current_user),db: Session=Depends(get_db)):
+    rows=db.scalars(select(Branch).where(Branch.active.is_(True)).order_by(Branch.id)).all()
+    if not user.is_admin:rows=[b for b in rows if b.id==user.branch_id]
+    return [{'id':b.id,'name':b.name,'invoice_prefix':b.invoice_prefix,'gstin':b.gstin,'address':b.address,'phone':b.phone} for b in rows]
+
+@app.put('/users/{id}/branch')
+def assign_user_branch(id: str,branch_id: str,user: User=Depends(admin),db: Session=Depends(get_db)):
+    branch=db.get(Branch,branch_id)
+    if not branch or not branch.active:raise HTTPException(422,'Unknown or inactive branch')
+    target=get_or_404(db,User,id)
+    target.branch_id=branch.id
+    audit(db,user,'user.branch_assigned',id,{'branch_id':branch.id})
+    db.commit()
+    return {'id':target.id,'name':target.name,'branch_id':target.branch_id}
 
 @app.get('/orders/cashiers')
 def order_cashiers(user: User=Depends(require('orders')),db: Session=Depends(get_db)):
