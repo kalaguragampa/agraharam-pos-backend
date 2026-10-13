@@ -265,6 +265,9 @@ def create_order(body: OrderIn,user: User=Depends(require('billing')),db: Sessio
         raise HTTPException(409,'Order could not be saved; retry the same request')
     return order_view(order)
 
+@app.get('/orders/cashiers')
+def order_cashiers(user: User=Depends(require('orders')),db: Session=Depends(get_db)):
+    return sorted([name for name in db.scalars(select(Order.staff_name).distinct()) if name],key=str.casefold)
 @app.get('/orders')
 def orders(q: str=Query('',max_length=100),payment: str|None=None,start: date|None=None,end: date|None=None,cashier: str|None=None,limit: int=Query(100,ge=1,le=500),offset: int=Query(0,ge=0),user: User=Depends(require('orders')),db: Session=Depends(get_db)):
     stmt=select(Order)
