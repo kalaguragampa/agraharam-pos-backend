@@ -184,7 +184,37 @@ def edit_customer(id: str,body: CustomerIn,user: User=Depends(require('customers
     for k,v in body.model_dump().items():setattr(c,k,v)
     audit(db,user,'customer.updated',c.id);db.commit();return customer_view(c)
 
-def settings_view(s):return {'gstin':s.gstin,'state_code':s.state_code,'address':s.address,'phone':s.phone,'tax_rate':float(s.tax_rate)}
+def settings_view(s):return {'gstin':s.gstin,'state_code':s.state_code,'address':s.address,'phone':s.phone,'tax_rate':float(s.tax_rate),'business_name':s.business_name,'branch_name':s.branch_name,'legal_name':s.legal_name,'fssai_number':s.fssai_number,'invoice_prefix':s.invoice_prefix}
+
+def invoice_number(db,s,created_at):
+    local=created_at.astimezone(ZoneInfo('Asia/Kolkata'))
+    year=local.year if local.month>=4 else local.year-1
+    fy=f'{year%100:02d}{(year+1)%100:02d}'
+    prefix=f'{s.invoice_prefix}-{fy}-'
+    # Serialize invoice allocation across online and offline billing sessions.
+    db.execute(text('SELECT pg_advisory_xact_lock(74120512)'))
+    previous=db.scalars(select(Order.bill_number).where(Order.bill_number.like(prefix+'%'))).all()
+    numbers=[int(v[len(prefix):]) for v in previous if v and v[len(prefix):].isdigit()]
+    return prefix+str(max(numbers,default=0)+1)
+
+def receipt_settings(s):
+    return {k:getattr(s,k) for k in ('business_name','branch_name','legal_name','fssai_number','gstin','address','phone')}
+
+def tax_lines(items,default_rate,seller_state,buyer_state):
+    interstate=bool(buyer_state and seller_state and buyer_state!=seller_state)
+    total_taxable=Decimal('0');total_tax=Decimal('0');total_cgst=Decimal('0');total_sgst=Decimal('0');total_igst=Decimal('0')
+    for line in items:
+        rate=Decimal(str(line.get('gst_rate_override') if line.get('gst_rate_override') is not None else default_rate))
+        gross=Decimal(str(line['line_total']))
+        taxable=(gross/(1+rate/100)).quantize(Decimal('.01'),rounding=ROUND_HALF_UP)
+        tax=gross-taxable
+        cgst=Decimal('0') if interstate else (tax/2).quantize(Decimal('.01'),rounding=ROUND_HALF_UP)
+        sgst=Decimal('0') if interstate else tax-cgst
+        igst=tax if interstate else Decimal('0')
+        line.update({'gst_rate':str(rate),'taxable_value':str(taxable),'tax_amount':str(tax),'cgst':str(cgst),'sgst':str(sgst),'igst':str(igst)})
+        total_taxable+=taxable;total_tax+=tax;total_cgst+=cgst;total_sgst+=sgst;total_igst+=igst
+    return total_taxable,total_tax,total_cgst,total_sgst,total_igst
+
 @app.get('/settings')
 def read_settings(user: User=Depends(require('settings','billing')),db: Session=Depends(get_db)):return settings_view(settings(db))
 @app.put('/settings')
@@ -193,7 +223,7 @@ def edit_settings(body: SettingsIn,user: User=Depends(require('settings')),db: S
     for k,v in body.model_dump().items():setattr(s,k,v)
     audit(db,user,'settings.updated',1,settings_view(s));db.commit();return settings_view(s)
 
-def order_view(o):return {'gst_details':o.gst_details,'id':o.id,'status':o.status,'cancellation':o.cancellation,'bill_number':f'AGR-{o.id:06d}','request_id':o.request_id,'staff_name':o.staff_name,'staff_username':o.staff_username,'customer_name':o.customer_name,'customer_id':o.customer_id,'order_type':o.order_type,'payment':o.payment,'payments':o.payment_details or [{'method':o.payment,'amount':str(o.total)}],'items':o.items,'total':float(o.total),'subtotal':float(o.subtotal),'tax':float(o.tax),'tax_rate':float(o.tax_rate),'address':o.address,'phone':o.phone,'created_at':o.created_at}
+def order_view(o):return {'gst_details':o.gst_details,'id':o.id,'status':o.status,'cancellation':o.cancellation,'bill_number':o.bill_number or f'AGR-{o.id:06d}','receipt_details':o.receipt_details or {},'request_id':o.request_id,'staff_name':o.staff_name,'staff_username':o.staff_username,'customer_name':o.customer_name,'customer_id':o.customer_id,'order_type':o.order_type,'payment':o.payment,'payments':o.payment_details or [{'method':o.payment,'amount':str(o.total)}],'items':o.items,'total':float(o.total),'subtotal':float(o.subtotal),'tax':float(o.tax),'tax_rate':float(o.tax_rate),'address':o.address,'phone':o.phone,'created_at':o.created_at}
 @app.post('/orders',status_code=201)
 def create_order(body: OrderIn,user: User=Depends(require('billing')),db: Session=Depends(get_db)):
     rid=str(body.request_id)
@@ -215,10 +245,13 @@ def create_order(body: OrderIn,user: User=Depends(require('billing')),db: Sessio
         items.append({'item_id':id,'name':item.name,'category':item.category,'price':str(item.price),'qty':qty,'line_total':str(line_total),**{k:v for k,v in (item.service_details or {}).items() if k!='image'}})
     if total != body.expected_total:raise HTTPException(409,'Item prices changed. Reload the billing page and review the updated total before payment.')
     c=get_or_404(db,Customer,body.customer_id) if body.customer_id else None;s=settings(db)
-    subtotal=(total/(1+s.tax_rate/100)).quantize(Decimal('.01'),rounding=ROUND_HALF_UP)
-    order=Order(gst_details=tax_snapshot(s.gstin,s.state_code,body.buyer_gstin,body.place_of_supply,total-subtotal,total),request_id=rid,request_body=body.model_dump(mode='json'),staff_id=user.id,staff_name=user.name,staff_username=user.username or '',customer_id=c.id if c else None,customer_name=c.name if c else '',order_type=body.order_type,payment=body.payment,payment_details=payment_details(body),items=items,total=total,subtotal=subtotal,tax=total-subtotal,tax_rate=s.tax_rate,address=s.address,phone=s.phone)
+    subtotal,calculated_tax,cgst,sgst,igst=tax_lines(items,s.tax_rate,s.state_code or s.gstin[:2],body.place_of_supply)
+    snapshot=tax_snapshot(s.gstin,s.state_code,body.buyer_gstin,body.place_of_supply,calculated_tax,total)
+    if snapshot.get('classification')!='UNCLASSIFIED':snapshot.update(cgst=str(cgst),sgst=str(sgst),igst=str(igst))
+    order=Order(gst_details=snapshot,receipt_details=receipt_settings(s),request_id=rid,request_body=body.model_dump(mode='json'),staff_id=user.id,staff_name=user.name,staff_username=user.username or '',customer_id=c.id if c else None,customer_name=c.name if c else '',order_type=body.order_type,payment=body.payment,payment_details=payment_details(body),items=items,total=total,subtotal=subtotal,tax=total-subtotal,tax_rate=s.tax_rate,address=s.address,phone=s.phone)
     db.add(order)
     try:
+        order.bill_number=invoice_number(db,s,datetime.now(timezone.utc))
         db.flush();audit(db,user,'order.completed',order.id,{'total':str(total),'payment':body.payment});db.commit()
     except IntegrityError:
         db.rollback();old=existing()
@@ -230,7 +263,7 @@ def create_order(body: OrderIn,user: User=Depends(require('billing')),db: Sessio
 def orders(q: str=Query('',max_length=100),payment: str|None=None,limit: int=Query(100,ge=1,le=500),offset: int=Query(0,ge=0),user: User=Depends(require('orders')),db: Session=Depends(get_db)):
     stmt=select(Order)
     if q:
-        stmt=stmt.where((Order.customer_name.ilike('%'+q.replace('%','\\%').replace('_','\\_')+'%',escape='\\'))|(Order.id==int(q.removeprefix('AGR-')) if q.removeprefix('AGR-').isdigit() else False))
+        stmt=stmt.where((Order.bill_number==q)|(Order.customer_name.ilike('%'+q.replace('%','\\%').replace('_','\\_')+'%',escape='\\'))|(Order.id==int(q.removeprefix('AGR-')) if q.removeprefix('AGR-').isdigit() else False))
     if payment:stmt=stmt.where(or_(Order.payment==payment,*[Order.payment_details[n]['method'].as_string()==payment for n in range(3)]))
     count=db.scalar(select(func.count()).select_from(stmt.subquery()))
     return {'total':count,'items':[order_view(o) for o in db.scalars(stmt.order_by(Order.id.desc()).limit(limit).offset(offset))]}
