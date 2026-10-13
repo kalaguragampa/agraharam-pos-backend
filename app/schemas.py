@@ -130,13 +130,6 @@ class OfflineOrderIn(Payload):
     order: OrderIn
     catalogue_token: str = Field(min_length=1,max_length=250000)
     created_at: datetime
-)
-    hsn_code: str = Field(default='',max_length=12,pattern=r'^\d*
-    description: str = Field(default='',max_length=1000)
-    name: str = Field(min_length=1,max_length=80)
-    category: str = Field(min_length=1,max_length=40)
-    price: Decimal = Field(gt=0,le=100000,max_digits=12,decimal_places=2)
-    active: bool = True
 class CustomerIn(Payload):
     gstin: str = Field(default='',pattern=r'^$|^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][A-Z0-9]Z[A-Z0-9]$')
 
