@@ -33,4 +33,4 @@ def admin(user: User = Depends(current_user)):
     return user
 
 def user_view(user):
-    return {'id':user.id,'username':user.username or user.email.split('@')[0],'has_saved_passcode':bool(user.passcode_ciphertext),'email':user.email,'name':user.name,'active':user.active,'is_admin':user.is_admin,'permissions':PERMISSIONS if user.is_admin else user.permissions}
+    return {'branch_id':user.branch_id,'id':user.id,'username':user.username or user.email.split('@')[0],'has_saved_passcode':bool(user.passcode_ciphertext),'email':user.email,'name':user.name,'active':user.active,'is_admin':user.is_admin,'permissions':PERMISSIONS if user.is_admin else user.permissions}
