@@ -67,7 +67,131 @@ class MenuIn(Payload):
 
     code: str = Field(default='',max_length=40)
     duration_minutes: int = Field(default=0,ge=0,le=1440)
-    sac_code: str = Field(default='',max_length=12,pattern=r'^\d*$')
+    sac_code: str = Field(default='',max_length=12,pattern=r'^\d*
+    description: str = Field(default='',max_length=1000)
+    name: str = Field(min_length=1,max_length=80)
+    category: str = Field(min_length=1,max_length=40)
+    price: Decimal = Field(gt=0,le=100000,max_digits=12,decimal_places=2)
+    active: bool = True
+class CustomerIn(Payload):
+    gstin: str = Field(default='',pattern=r'^$|^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][A-Z0-9]Z[A-Z0-9]$')
+
+    name: str = Field(min_length=1,max_length=80)
+    phone: str = Field(default='',max_length=20)
+class SettingsIn(Payload):
+    gstin: str = Field(default='',pattern=r'^$|^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][A-Z0-9]Z[A-Z0-9]$')
+    state_code: str = Field(default='',pattern=r'^$|^[0-9]{2}$')
+    @model_validator(mode='after')
+    def seller_state(self):
+        if self.gstin and self.state_code and self.gstin[:2]!=self.state_code:raise ValueError('GSTIN and business state must match')
+        return self
+
+    address: str = Field(default='',max_length=200)
+    phone: str = Field(default='',max_length=20)
+    tax_rate: Decimal = Field(default=0,ge=0,le=30,max_digits=5,decimal_places=2)
+class LineIn(Payload):
+    item_id: UUID
+    qty: int = Field(ge=1,le=1000)
+class PaymentIn(Payload):
+    method: Literal['Cash','UPI','Card']
+    amount: Decimal = Field(gt=0,le=10000000000,max_digits=14,decimal_places=2)
+class OrderIn(Payload):
+    payments: list[PaymentIn] | None = Field(default=None,min_length=1,max_length=3)
+
+    place_of_supply: str = Field(default='',pattern=r'^$|^[0-9]{2}$')
+    buyer_gstin: str = Field(default='',pattern=r'^$|^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][A-Z0-9]Z[A-Z0-9]$')
+    request_id: UUID
+    expected_total: Decimal = Field(gt=0,le=10000000000,max_digits=14,decimal_places=2)
+    customer_id: UUID | None = None
+    order_type: Literal['Item','Service','Dine-in','Takeaway']
+    payment: Literal['Cash','UPI','Card','Split']
+    items: list[LineIn] = Field(min_length=1,max_length=100)
+
+    @model_validator(mode='after')
+    def validate_payments(self):
+        if self.payment=='Split' and (not self.payments or len(self.payments)<2):raise ValueError('Split payment requires at least two payment methods')
+        if self.payments:
+            methods=[p.method for p in self.payments]
+            if len(set(methods))!=len(methods):raise ValueError('Each payment method can appear only once')
+            if sum((p.amount for p in self.payments),Decimal('0'))!=self.expected_total:raise ValueError('Payment amounts must equal the bill total')
+            if self.payment!='Split' and (len(methods)!=1 or methods[0]!=self.payment):raise ValueError('Payment method does not match the payment breakdown')
+        return self
+
+class CategoryIn(Payload):
+    name: str = Field(min_length=1,max_length=40)
+    active: bool = True
+class CancelIn(Payload):
+    reason: str = Field(min_length=3,max_length=300)
+
+from datetime import datetime
+class OfflineOrderIn(Payload):
+    order: OrderIn
+    catalogue_token: str = Field(min_length=1,max_length=250000)
+    created_at: datetime
+)
+    hsn_code: str = Field(default='',max_length=12,pattern=r'^\d*
+    description: str = Field(default='',max_length=1000)
+    name: str = Field(min_length=1,max_length=80)
+    category: str = Field(min_length=1,max_length=40)
+    price: Decimal = Field(gt=0,le=100000,max_digits=12,decimal_places=2)
+    active: bool = True
+class CustomerIn(Payload):
+    gstin: str = Field(default='',pattern=r'^$|^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][A-Z0-9]Z[A-Z0-9]$')
+
+    name: str = Field(min_length=1,max_length=80)
+    phone: str = Field(default='',max_length=20)
+class SettingsIn(Payload):
+    gstin: str = Field(default='',pattern=r'^$|^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][A-Z0-9]Z[A-Z0-9]$')
+    state_code: str = Field(default='',pattern=r'^$|^[0-9]{2}$')
+    @model_validator(mode='after')
+    def seller_state(self):
+        if self.gstin and self.state_code and self.gstin[:2]!=self.state_code:raise ValueError('GSTIN and business state must match')
+        return self
+
+    address: str = Field(default='',max_length=200)
+    phone: str = Field(default='',max_length=20)
+    tax_rate: Decimal = Field(default=0,ge=0,le=30,max_digits=5,decimal_places=2)
+class LineIn(Payload):
+    item_id: UUID
+    qty: int = Field(ge=1,le=1000)
+class PaymentIn(Payload):
+    method: Literal['Cash','UPI','Card']
+    amount: Decimal = Field(gt=0,le=10000000000,max_digits=14,decimal_places=2)
+class OrderIn(Payload):
+    payments: list[PaymentIn] | None = Field(default=None,min_length=1,max_length=3)
+
+    place_of_supply: str = Field(default='',pattern=r'^$|^[0-9]{2}$')
+    buyer_gstin: str = Field(default='',pattern=r'^$|^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][A-Z0-9]Z[A-Z0-9]$')
+    request_id: UUID
+    expected_total: Decimal = Field(gt=0,le=10000000000,max_digits=14,decimal_places=2)
+    customer_id: UUID | None = None
+    order_type: Literal['Item','Service','Dine-in','Takeaway']
+    payment: Literal['Cash','UPI','Card','Split']
+    items: list[LineIn] = Field(min_length=1,max_length=100)
+
+    @model_validator(mode='after')
+    def validate_payments(self):
+        if self.payment=='Split' and (not self.payments or len(self.payments)<2):raise ValueError('Split payment requires at least two payment methods')
+        if self.payments:
+            methods=[p.method for p in self.payments]
+            if len(set(methods))!=len(methods):raise ValueError('Each payment method can appear only once')
+            if sum((p.amount for p in self.payments),Decimal('0'))!=self.expected_total:raise ValueError('Payment amounts must equal the bill total')
+            if self.payment!='Split' and (len(methods)!=1 or methods[0]!=self.payment):raise ValueError('Payment method does not match the payment breakdown')
+        return self
+
+class CategoryIn(Payload):
+    name: str = Field(min_length=1,max_length=40)
+    active: bool = True
+class CancelIn(Payload):
+    reason: str = Field(min_length=3,max_length=300)
+
+from datetime import datetime
+class OfflineOrderIn(Payload):
+    order: OrderIn
+    catalogue_token: str = Field(min_length=1,max_length=250000)
+    created_at: datetime
+)
+    gst_rate_override: Decimal | None = Field(default=None,ge=0,le=30,max_digits=5,decimal_places=2)
     description: str = Field(default='',max_length=1000)
     name: str = Field(min_length=1,max_length=80)
     category: str = Field(min_length=1,max_length=40)
