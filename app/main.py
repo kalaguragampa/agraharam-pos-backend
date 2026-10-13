@@ -355,8 +355,8 @@ def summary(db,start,end):
             p=popular.setdefault(i['name'],{'name':i['name'],'qty':0,'sales':0.0});p['qty']+=i['qty'];p['sales']+=float(i['line_total'])
     return {'total_sales':float(sum((o.total for o in rows),Decimal('0'))),'bill_count':len(rows),'tax':float(sum((o.tax for o in rows),Decimal('0'))),'cancelled_count':db.scalar(select(func.count()).select_from(date_query(start,end,True).where(Order.status=='Cancelled').subquery())),'cancelled_amount':float(sum((o.total for o in db.scalars(date_query(start,end,True).where(Order.status=='Cancelled'))),Decimal('0'))),'payments':{k:float(v) for k,v in payments.items()},'popular':sorted(popular.values(),key=lambda i:i['sales'],reverse=True)}
 @app.get('/dashboard')
-def dashboard(user: User=Depends(require('dashboard')),db: Session=Depends(get_db)):
-    day=datetime.now(IST).date();return summary(db,day,day)
+def dashboard(start: date|None=None,end: date|None=None,user: User=Depends(require('dashboard')),db: Session=Depends(get_db)):
+    day=datetime.now(IST).date();return summary(db,start or day,end or day)
 @app.get('/reports')
 def reports(start: date|None=None,end: date|None=None,user: User=Depends(require('reports','report_pos')),db: Session=Depends(get_db)):return summary(db,start,end)
 @app.get('/reports/export')
