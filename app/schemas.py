@@ -102,6 +102,7 @@ class PaymentIn(Payload):
     method: Literal['Cash','UPI','Card']
     amount: Decimal = Field(gt=0,le=10000000000,max_digits=14,decimal_places=2)
 class OrderIn(Payload):
+    branch_id: Literal['BR001','BR002'] | None = None
     payments: list[PaymentIn] | None = Field(default=None,min_length=1,max_length=3)
 
     place_of_supply: str = Field(default='',pattern=r'^$|^[0-9]{2}$')
