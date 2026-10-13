@@ -32,7 +32,7 @@ def gst_report_data(orders):
         for k in fields:rows[group][k]+=values[k]
         remaining={k:values[k] for k in fields}
         for index,line in enumerate(o.items):
-            key=(group,line.get('sac_code') or 'Missing HSN/SAC')
+            key=(group,line.get('hsn_code') or line.get('sac_code') or 'Missing HSN/SAC')
             h=hsn.setdefault(key,{'code':key[1],'qty':0,**{k:Decimal('0') for k in fields}});h['qty']+=line['qty']
             for k in fields:
                 value=remaining[k] if index==len(o.items)-1 else (values[k]*Decimal(str(line['line_total']))/o.total).quantize(Decimal('.01'),rounding=ROUND_HALF_UP)
