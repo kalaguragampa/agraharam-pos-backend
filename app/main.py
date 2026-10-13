@@ -303,12 +303,13 @@ def order_cashiers(branch_id: str|None=None,user: User=Depends(require('orders')
     if selected:q=q.where(Order.branch_id==selected)
     return sorted([name for name in db.scalars(q) if name],key=str.casefold)
 @app.get('/orders')
-def orders(q: str=Query('',max_length=100),payment: str|None=None,start: date|None=None,end: date|None=None,from_time: time|None=None,to_time: time|None=None,cashier: str|None=None,branch_id: str|None=None,limit: int=Query(100,ge=1,le=500),offset: int=Query(0,ge=0),user: User=Depends(require('orders')),db: Session=Depends(get_db)):
+def orders(q: str=Query('',max_length=100),payment: str|None=None,status: str|None=None,start: date|None=None,end: date|None=None,from_time: time|None=None,to_time: time|None=None,cashier: str|None=None,branch_id: str|None=None,limit: int=Query(100,ge=1,le=500),offset: int=Query(0,ge=0),user: User=Depends(require('orders')),db: Session=Depends(get_db)):
     stmt=select(Order)
     selected=resolved_branch(user,branch_id,db)
     if selected:stmt=stmt.where(Order.branch_id==selected)
     if q:
         stmt=stmt.where((Order.bill_number==q)|(Order.request_id==q.removeprefix('LOCAL-'))|(Order.customer_name.ilike('%'+q.replace('%','\\%').replace('_','\\_')+'%',escape='\\'))|(Order.id==int(q.removeprefix('AGR-')) if q.removeprefix('AGR-').isdigit() else False))
+    if status in ('Completed','Cancelled'):stmt=stmt.where(Order.status==status)
     if payment:stmt=stmt.where(or_(Order.payment==payment,*[Order.payment_details[n]['method'].as_string()==payment for n in range(3)]))
     if start and end and start>end:raise HTTPException(422,'End date must follow start date')
     if (from_time or to_time) and (not start or not end):raise HTTPException(422,'Select both From and To dates before filtering by time')
@@ -380,7 +381,7 @@ def service_summary(db,start,end):
             tax=remaining if index==len(o.items)-1 else (o.tax*total/o.total).quantize(Decimal('.01'),rounding=ROUND_HALF_UP)
             remaining-=tax
             key=line['item_id']+'|'+line['name']
-            row=grouped.setdefault(key,{'id':key,'name':line['name'],'qty':0,'subtotal':Decimal('0'),'tax':Decimal('0'),'total':Decimal('0'),'Cash':Decimal('0'),'UPI':Decimal('0'),'Card':Decimal('0')})
+            row=grouped.setdefault(key,{'id':key,'name':line['name'],'category':line.get('category',''),'qty':0,'subtotal':Decimal('0'),'tax':Decimal('0'),'total':Decimal('0'),'Cash':Decimal('0'),'UPI':Decimal('0'),'Card':Decimal('0')})
             row['qty']+=line['qty'];row['subtotal']+=total-tax;row['tax']+=tax;row['total']+=total
             for method,amount in payment_lines[index].items():row[method]+=amount
     rows=sorted(grouped.values(),key=lambda r:r['total'],reverse=True)
