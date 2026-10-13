@@ -287,12 +287,26 @@ def assign_user_branch(id: str,branch_id: str,user: User=Depends(admin),db: Sess
     db.commit()
     return {'id':target.id,'name':target.name,'branch_id':target.branch_id}
 
+def resolved_branch(user,branch_id,db):
+    if user.is_admin:
+        if branch_id and (not db.get(Branch,branch_id) or not db.get(Branch,branch_id).active):
+            raise HTTPException(422,'Unknown or inactive branch')
+        return branch_id
+    if not user.branch_id:raise HTTPException(403,'Cashier branch is not assigned')
+    if branch_id and branch_id!=user.branch_id:raise HTTPException(403,'Branch access denied')
+    return user.branch_id
+
 @app.get('/orders/cashiers')
-def order_cashiers(user: User=Depends(require('orders')),db: Session=Depends(get_db)):
-    return sorted([name for name in db.scalars(select(Order.staff_name).distinct()) if name],key=str.casefold)
+def order_cashiers(branch_id: str|None=None,user: User=Depends(require('orders')),db: Session=Depends(get_db)):
+    selected=resolved_branch(user,branch_id,db)
+    q=select(Order.staff_name).distinct()
+    if selected:q=q.where(Order.branch_id==selected)
+    return sorted([name for name in db.scalars(q) if name],key=str.casefold)
 @app.get('/orders')
-def orders(q: str=Query('',max_length=100),payment: str|None=None,start: date|None=None,end: date|None=None,cashier: str|None=None,limit: int=Query(100,ge=1,le=500),offset: int=Query(0,ge=0),user: User=Depends(require('orders')),db: Session=Depends(get_db)):
+def orders(q: str=Query('',max_length=100),payment: str|None=None,start: date|None=None,end: date|None=None,cashier: str|None=None,branch_id: str|None=None,limit: int=Query(100,ge=1,le=500),offset: int=Query(0,ge=0),user: User=Depends(require('orders')),db: Session=Depends(get_db)):
     stmt=select(Order)
+    selected=resolved_branch(user,branch_id,db)
+    if selected:stmt=stmt.where(Order.branch_id==selected)
     if q:
         stmt=stmt.where((Order.bill_number==q)|(Order.customer_name.ilike('%'+q.replace('%','\\%').replace('_','\\_')+'%',escape='\\'))|(Order.id==int(q.removeprefix('AGR-')) if q.removeprefix('AGR-').isdigit() else False))
     if payment:stmt=stmt.where(or_(Order.payment==payment,*[Order.payment_details[n]['method'].as_string()==payment for n in range(3)]))
@@ -306,6 +320,7 @@ def orders(q: str=Query('',max_length=100),payment: str|None=None,start: date|No
 def receipt(id: int,user: User=Depends(require('orders','billing')),db: Session=Depends(get_db)):
     o=db.get(Order,id)
     if not o:raise HTTPException(404,'Bill not found')
+    resolved_branch(user,o.branch_id,db)
     if not user.is_admin and 'orders' not in user.permissions and o.staff_id!=user.id:raise HTTPException(403,'Access denied')
     return order_view(o)
 
@@ -313,6 +328,7 @@ def receipt(id: int,user: User=Depends(require('orders','billing')),db: Session=
 def cancel_bill(id: int,body: CancelIn,user: User=Depends(require('cancel_bills')),db: Session=Depends(get_db)):
     order=db.scalar(select(Order).where(Order.id==id).with_for_update())
     if not order:raise HTTPException(404,'Bill not found')
+    resolved_branch(user,order.branch_id,db)
     if order.status=='Cancelled':return order_view(order)
     order.status='Cancelled'
     order.cancellation={'reason':body.reason,'actor_id':user.id,'actor_name':user.name,'cancelled_at':datetime.now(timezone.utc).isoformat()}
