@@ -102,6 +102,7 @@ class PaymentIn(Payload):
     method: Literal['Cash','UPI','Card']
     amount: Decimal = Field(gt=0,le=10000000000,max_digits=14,decimal_places=2)
 class OrderIn(Payload):
+    cash_received: Decimal | None = Field(default=None,gt=0,le=10000000000,max_digits=14,decimal_places=2)
     branch_id: Literal['BR001','BR002'] | None = None
     payments: list[PaymentIn] | None = Field(default=None,min_length=1,max_length=3)
 
@@ -116,6 +117,9 @@ class OrderIn(Payload):
 
     @model_validator(mode='after')
     def validate_payments(self):
+        cash_due=self.expected_total if self.payment=='Cash' else (next((p.amount for p in (self.payments or []) if p.method=='Cash'),Decimal('0')) if self.payment=='Split' else Decimal('0'))
+        if self.cash_received is not None and (cash_due<=0 or self.cash_received<cash_due):raise ValueError('Cash received must be at least the cash amount due')
+        if self.payment=='Cash' and self.cash_received is None:raise ValueError('Enter cash received before completing the bill')
         if self.payment=='Split' and (not self.payments or len(self.payments)<2):raise ValueError('Split payment requires at least two payment methods')
         if self.payments:
             methods=[p.method for p in self.payments]
