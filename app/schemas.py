@@ -67,7 +67,9 @@ class MenuIn(Payload):
 
     code: str = Field(default='',max_length=40)
     duration_minutes: int = Field(default=0,ge=0,le=1440)
-    sac_code: str = Field(default='',max_length=12,pattern=r'^\d*
+    sac_code: str = Field(default='',max_length=12,pattern=r'^\d*$')
+    hsn_code: str = Field(default='',max_length=12,pattern=r'^\d*$')
+    gst_rate_override: Decimal | None = Field(default=None,ge=0,le=30,max_digits=5,decimal_places=2)
     description: str = Field(default='',max_length=1000)
     name: str = Field(min_length=1,max_length=80)
     category: str = Field(min_length=1,max_length=40)
