@@ -23,11 +23,13 @@ def gst_report_data(orders):
         if o.status!='Completed':continue
         g=o.gst_details or {};kind=g.get('classification','UNCLASSIFIED')
         if kind not in ['B2B','B2CL','B2CS']:kind='UNCLASSIFIED'
-        values={'subtotal':o.subtotal,'total':o.total,**{k:Decimal(str(g.get(k,0))) for k in ['cgst','sgst','igst','cess']}}
+        values={'subtotal':o.subtotal,'total':o.total,**{k:Decimal(str(g.get(k) or 0)) for k in ['cgst','sgst','igst','cess']}}
         r=rows[kind]
         for k in fields:r[k]+=values[k]
         r['details'].append({**doc,'gstin':g.get('buyer_gstin',''),'place_of_supply':g.get('place_of_supply',''),**values,'gst':o.tax})
-        if kind=='UNCLASSIFIED':continue
+        if kind=='UNCLASSIFIED':
+            r['details'][-1]['reason']=g.get('reason','Missing historical GST classification')
+            continue
         group='HSN(B2B)' if kind=='B2B' else 'HSN(B2C)'
         for k in fields:rows[group][k]+=values[k]
         remaining={k:values[k] for k in fields}
@@ -37,7 +39,7 @@ def gst_report_data(orders):
             for k in fields:
                 value=(Decimal(str(line.get({'subtotal':'taxable_value','cgst':'cgst','sgst':'sgst','igst':'igst','total':'line_total'}.get(k,''),0))) if k!='cess' else Decimal('0')) if 'taxable_value' in line else (remaining[k] if index==len(o.items)-1 else (values[k]*Decimal(str(line['line_total']))/o.total).quantize(Decimal('.01'),rounding=ROUND_HALF_UP))
                 h[k]+=value;remaining[k]-=value
-    for (group,_),r in hsn.items():rows[group]['details'].append(r)
+    for (group,_,rate),r in hsn.items():rows[group]['details'].append(r)
     unknown=rows['UNCLASSIFIED'];unknown['note']='Tax split and B2B/B2C classification require review; historical bills were not changed'
     for k in ['cgst','sgst','igst','cess']:unknown[k]=None
     issued=len(orders);cancelled=sum(o.status=='Cancelled' for o in orders)
