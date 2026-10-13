@@ -245,6 +245,12 @@ def create_order(body: OrderIn,user: User=Depends(require('billing')),db: Sessio
         items.append({'item_id':id,'name':item.name,'category':item.category,'price':str(item.price),'qty':qty,'line_total':str(line_total),**{k:v for k,v in (item.service_details or {}).items() if k!='image'}})
     if total != body.expected_total:raise HTTPException(409,'Item prices changed. Reload the billing page and review the updated total before payment.')
     c=get_or_404(db,Customer,body.customer_id) if body.customer_id else None;s=settings(db)
+    if not s.gstin or not (s.state_code or s.gstin[:2]):
+        raise HTTPException(422,'Configure the business GSTIN and state code in Settings before creating a GST bill')
+    if not body.place_of_supply:
+        raise HTTPException(422,'Place of supply is required for GST billing; refresh POS settings and retry')
+    if body.buyer_gstin and body.buyer_gstin[:2]!=body.place_of_supply:
+        raise HTTPException(422,'Buyer GSTIN state and place of supply differ; review the transaction')
     subtotal,calculated_tax,cgst,sgst,igst=tax_lines(items,s.tax_rate,s.state_code or s.gstin[:2],body.place_of_supply)
     snapshot=tax_snapshot(s.gstin,s.state_code,body.buyer_gstin,body.place_of_supply,calculated_tax,total)
     if snapshot.get('classification')!='UNCLASSIFIED':snapshot.update(cgst=str(cgst),sgst=str(sgst),igst=str(igst))
