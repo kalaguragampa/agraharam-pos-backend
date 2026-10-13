@@ -61,11 +61,18 @@ class CompanySettings(Base):
     address: Mapped[str] = mapped_column(String(200), default='')
     phone: Mapped[str] = mapped_column(String(20), default='')
     tax_rate: Mapped[Decimal] = mapped_column(Numeric(5,2), default=0)
+    business_name: Mapped[str] = mapped_column(String(100), default='Agrahaaram Food Court')
+    branch_name: Mapped[str] = mapped_column(String(100), default='LB Nagar')
+    legal_name: Mapped[str] = mapped_column(String(100), default='KGSV Enterprises')
+    fssai_number: Mapped[str] = mapped_column(String(20), default='13625010000764')
+    invoice_prefix: Mapped[str] = mapped_column(String(12), default='AGLB')
 
 class Order(Base):
     gst_details: Mapped[dict] = mapped_column(JSON, default=dict, server_default='{}')
     __tablename__ = 'orders'
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    bill_number: Mapped[str | None] = mapped_column(String(50), nullable=True, unique=True)
+    receipt_details: Mapped[dict] = mapped_column(JSON, default=dict, server_default='{}')
     status: Mapped[str] = mapped_column(String(20), default='Completed', server_default='Completed')
     cancellation: Mapped[dict] = mapped_column(JSON, default=dict, server_default='{}')
     request_id: Mapped[str] = mapped_column(String(36), unique=True)
