@@ -140,12 +140,14 @@ def menu(user: User=Depends(require('menu','billing')),db: Session=Depends(get_d
 @app.post('/menu',status_code=201)
 def add_menu(body: MenuIn,user: User=Depends(require('menu')),db: Session=Depends(get_db)):
     payload=body.model_dump();details={k:payload.pop(k) for k in ('code','duration_minutes','sac_code','hsn_code','gst_rate_override','description','image')}
+    if details['gst_rate_override'] is not None:details['gst_rate_override']=float(details['gst_rate_override'])
     ensure_category(db,payload['category'])
     i=MenuItem(id=str(uuid4()),service_details=details,**payload);db.add(i);audit(db,user,'menu.created',i.id,{'name':i.name,'price':str(i.price)});db.commit();return menu_view(i)
 @app.put('/menu/{id}')
 def edit_menu(id: str,body: MenuIn,user: User=Depends(require('menu')),db: Session=Depends(get_db)):
     i=get_or_404(db,MenuItem,id);before={k:v for k,v in menu_view(i).items() if k!='image'}
     payload=body.model_dump();i.service_details={k:payload.pop(k) for k in ('code','duration_minutes','sac_code','hsn_code','gst_rate_override','description','image')}
+    if i.service_details['gst_rate_override'] is not None:i.service_details['gst_rate_override']=float(i.service_details['gst_rate_override'])
     ensure_category(db,payload['category'])
     for k,v in payload.items():setattr(i,k,v)
     audit(db,user,'menu.updated',i.id,{'before':before,'after':{k:v for k,v in menu_view(i).items() if k!='image'}});db.commit();return menu_view(i)
