@@ -59,7 +59,7 @@ def sync_order(body: OfflineOrderIn,user: User=Depends(require('billing')),db: S
     if body.created_at.tzinfo is None:raise HTTPException(422,'Offline bill time must include a timezone')
     created=body.created_at.astimezone(timezone.utc);now=datetime.now(timezone.utc)
     issued=datetime.fromisoformat(snapshot['issued_at']);expires=datetime.fromisoformat(snapshot['expires_at'])
-    if created<issued or created>expires or created>now+timedelta(minutes=5):raise HTTPException(409,'Offline bill time is outside the cached catalogue validity period')
+    # The device records the sale immediately before fetching its signed catalogue.\n    # Allow only a small clock/round-trip skew; keep all other signature and total checks.\n    if created<issued-timedelta(seconds=5) or created>expires or created>now+timedelta(minutes=5):raise HTTPException(409,'Offline bill time is outside the cached catalogue validity period')
     if now>expires+timedelta(days=7):raise HTTPException(409,'Offline bill is too old for automatic sync; administrator review required')
     prices={i['item_id']:i for i in snapshot['items']};quantities={}
     for line in order.items:
