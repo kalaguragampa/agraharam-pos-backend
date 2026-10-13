@@ -303,16 +303,18 @@ def order_cashiers(branch_id: str|None=None,user: User=Depends(require('orders')
     if selected:q=q.where(Order.branch_id==selected)
     return sorted([name for name in db.scalars(q) if name],key=str.casefold)
 @app.get('/orders')
-def orders(q: str=Query('',max_length=100),payment: str|None=None,start: date|None=None,end: date|None=None,cashier: str|None=None,branch_id: str|None=None,limit: int=Query(100,ge=1,le=500),offset: int=Query(0,ge=0),user: User=Depends(require('orders')),db: Session=Depends(get_db)):
+def orders(q: str=Query('',max_length=100),payment: str|None=None,start: date|None=None,end: date|None=None,from_time: time|None=None,to_time: time|None=None,cashier: str|None=None,branch_id: str|None=None,limit: int=Query(100,ge=1,le=500),offset: int=Query(0,ge=0),user: User=Depends(require('orders')),db: Session=Depends(get_db)):
     stmt=select(Order)
     selected=resolved_branch(user,branch_id,db)
     if selected:stmt=stmt.where(Order.branch_id==selected)
     if q:
-        stmt=stmt.where((Order.bill_number==q)|(Order.customer_name.ilike('%'+q.replace('%','\\%').replace('_','\\_')+'%',escape='\\'))|(Order.id==int(q.removeprefix('AGR-')) if q.removeprefix('AGR-').isdigit() else False))
+        stmt=stmt.where((Order.bill_number==q)|(Order.request_id==q.removeprefix('LOCAL-'))|(Order.customer_name.ilike('%'+q.replace('%','\\%').replace('_','\\_')+'%',escape='\\'))|(Order.id==int(q.removeprefix('AGR-')) if q.removeprefix('AGR-').isdigit() else False))
     if payment:stmt=stmt.where(or_(Order.payment==payment,*[Order.payment_details[n]['method'].as_string()==payment for n in range(3)]))
     if start and end and start>end:raise HTTPException(422,'End date must follow start date')
-    if start:stmt=stmt.where(Order.created_at>=datetime.combine(start,time.min,tzinfo=ZoneInfo('Asia/Kolkata')).astimezone(timezone.utc))
-    if end:stmt=stmt.where(Order.created_at<datetime.combine(end+timedelta(days=1),time.min,tzinfo=ZoneInfo('Asia/Kolkata')).astimezone(timezone.utc))
+    if (from_time or to_time) and (not start or not end):raise HTTPException(422,'Select both From and To dates before filtering by time')
+    if start and end and start==end and from_time and to_time and from_time>to_time:raise HTTPException(422,'To time must not be earlier than From time')
+    if start:stmt=stmt.where(Order.created_at>=datetime.combine(start,from_time or time.min,tzinfo=ZoneInfo('Asia/Kolkata')).astimezone(timezone.utc))
+    if end:stmt=stmt.where(Order.created_at<(datetime.combine(end+timedelta(days=1),time.min,tzinfo=ZoneInfo('Asia/Kolkata')) if to_time is None else datetime.combine(end,to_time,tzinfo=ZoneInfo('Asia/Kolkata'))+timedelta(minutes=1)).astimezone(timezone.utc))
     if cashier:stmt=stmt.where(Order.staff_name==cashier)
     count=db.scalar(select(func.count()).select_from(stmt.subquery()))
     return {'total':count,'items':[order_view(o) for o in db.scalars(stmt.order_by(Order.id.desc()).limit(limit).offset(offset))]}
