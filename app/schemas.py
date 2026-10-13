@@ -119,7 +119,6 @@ class OrderIn(Payload):
     def validate_payments(self):
         cash_due=self.expected_total if self.payment=='Cash' else (next((p.amount for p in (self.payments or []) if p.method=='Cash'),Decimal('0')) if self.payment=='Split' else Decimal('0'))
         if self.cash_received is not None and (cash_due<=0 or self.cash_received<cash_due):raise ValueError('Cash received must be at least the cash amount due')
-        if self.payment=='Cash' and self.cash_received is None:raise ValueError('Enter cash received before completing the bill')
         if self.payment=='Split' and (not self.payments or len(self.payments)<2):raise ValueError('Split payment requires at least two payment methods')
         if self.payments:
             methods=[p.method for p in self.payments]
