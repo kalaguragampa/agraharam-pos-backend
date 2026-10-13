@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from .config import config
 from .db import get_db
-from .models import User, MenuItem, CompanySettings, Customer, Order, Audit
+from .models import User, MenuItem, CompanySettings, Customer, Order, Audit, Branch
 from .schemas import OfflineOrderIn, OrderIn
 from .security import require
 
@@ -78,11 +78,15 @@ def sync_order(body: OfflineOrderIn,user: User=Depends(require('billing')),db: S
     from .payments import payment_details
     gst=tax_snapshot(snapshot.get('seller_gstin',''),snapshot.get('seller_state',''),order.buyer_gstin,order.place_of_supply,calculated_tax,total)
     if gst.get('classification')!='UNCLASSIFIED':gst.update(cgst=str(cgst),sgst=str(sgst),igst=str(igst))
-    saved=Order(gst_details=gst,receipt_details=snapshot.get('receipt_details',{}),request_id=str(order.request_id),request_body=request_body,staff_id=user.id,staff_name=snapshot.get('staff_name',user.name),staff_username=snapshot.get('staff_username',user.username or ''),customer_id=customer.id if customer else None,customer_name=customer.name if customer else '',order_type=order.order_type,payment=order.payment,payment_details=payment_details(order),items=lines,total=total,subtotal=subtotal,tax=total-subtotal,tax_rate=rate,address=snapshot['address'],phone=snapshot['phone'],created_at=created)
+    branch_id=order.branch_id or user.branch_id
+    if not branch_id or (not user.is_admin and branch_id!=user.branch_id):raise HTTPException(403,'Offline bill branch does not match cashier assignment')
+    branch=db.get(Branch,branch_id)
+    if not branch or not branch.active:raise HTTPException(409,'Offline bill branch needs administrator review')
+    saved=Order(branch_id=branch_id,gst_details=gst,receipt_details=snapshot.get('receipt_details',{}),request_id=str(order.request_id),request_body=request_body,staff_id=user.id,staff_name=snapshot.get('staff_name',user.name),staff_username=snapshot.get('staff_username',user.username or ''),customer_id=customer.id if customer else None,customer_name=customer.name if customer else '',order_type=order.order_type,payment=order.payment,payment_details=payment_details(order),items=lines,total=total,subtotal=subtotal,tax=total-subtotal,tax_rate=rate,address=snapshot['address'],phone=snapshot['phone'],created_at=created)
     db.add(saved)
     from sqlalchemy.exc import IntegrityError
     try:
-        saved.bill_number=invoice_number(db,db.get(CompanySettings,1),created)
+        saved.bill_number=invoice_number(db,branch,created)
         db.flush();db.add(Audit(actor_id=user.id,action='bill.offline_synced',target_id=str(saved.id),details={'request_id':saved.request_id,'total':str(total),'payment':saved.payment}));db.commit()
     except IntegrityError:
         db.rollback();existing=db.scalar(select(Order).where(Order.request_id==str(order.request_id)))
