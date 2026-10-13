@@ -34,6 +34,10 @@ def seed():
             if not db.scalar(select(Category).where(Category.name==name)):
                 db.add(Category(id=str(uuid4()),name=name,active=True))
         db.flush()
+        # Preserve existing cashier billing access at LB Nagar until reassigned by an admin.
+        for existing_user in db.scalars(select(User).where(User.is_admin.is_(False),User.branch_id.is_(None))):
+            existing_user.branch_id='BR002'
+        db.flush()
         used={u.username for u in db.scalars(select(User)) if u.username}
         import re
         for u in db.scalars(select(User)):
