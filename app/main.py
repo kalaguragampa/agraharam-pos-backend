@@ -308,7 +308,7 @@ def orders(q: str=Query('',max_length=100),payment: str|None=None,status: str|No
     selected=resolved_branch(user,branch_id,db)
     if selected:stmt=stmt.where(Order.branch_id==selected)
     if q:
-        stmt=stmt.where((Order.bill_number==q)|(Order.request_id==q.removeprefix('LOCAL-'))|(Order.customer_name.ilike('%'+q.replace('%','\\%').replace('_','\\_')+'%',escape='\\'))|(Order.id==int(q.removeprefix('AGR-')) if q.removeprefix('AGR-').isdigit() else False))
+        stmt=stmt.where((Order.bill_number==q)|(Order.request_id==q.removeprefix('LOCAL-'))|(Order.request_id.ilike(q[4:]+'%') if q.upper().startswith('OFF-') and len(q)>=8 and all(c in '0123456789abcdefABCDEF' for c in q[4:]) else False)|(Order.customer_name.ilike('%'+q.replace('%','\\%').replace('_','\\_')+'%',escape='\\'))|(Order.id==int(q.removeprefix('AGR-')) if q.removeprefix('AGR-').isdigit() else False))
     if status in ('Completed','Cancelled'):stmt=stmt.where(Order.status==status)
     if payment:stmt=stmt.where(or_(Order.payment==payment,*[Order.payment_details[n]['method'].as_string()==payment for n in range(3)]))
     if start and end and start>end:raise HTTPException(422,'End date must follow start date')
